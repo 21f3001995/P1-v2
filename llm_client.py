@@ -1,89 +1,77 @@
-from pathlib import Path
-from typing import List, Dict, Optional
-import base64
 import os
-import openai
+import json
+import time
+from openai import OpenAI
+from typing import List, Dict
 
-# Make sure you set OPENAI_API_KEY in environment
-# export OPENAI_API_KEY="sk-..."
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 def generate_files_from_brief(
     brief: str,
-    attachments: List[Dict],
-    round_num: int = 1,
-    previous_repo_dir: Optional[Path] = None
+    attachments: List[Dict] = None,
+    previous_repo_dir: str = None,
+    max_retries: int = 3
 ) -> List[Dict]:
     """
-    Generate project files from a brief using OpenAI API.
-    Supports R1 creation and R2 updates.
-
-    Parameters
-    ----------
-    brief : str
-        The project instructions.
-    attachments : list of dict
-        Each dict: {"name": str, "url": str (data URI)}
-    round_num : int
-        1 = new project, 2 = update existing project
-    previous_repo_dir : Path
-        Path to previous repo (for round 2 updates)
-    
-    Returns
-    -------
-    files : list of dict
-        Each dict: {"path": relative_path, "content": str}
+    Generates project files from a brief using OpenAI.
+    attachments: [{"name": "...", "url": "..."}]
+    previous_repo_dir: If set, include current repo files for R2 modifications.
+    Returns a list of {"path": "...", "content": "..."} dicts.
     """
-
-    context = ""
-
-    if round_num == 2 and previous_repo_dir is not None:
-        # Include current repo files in context for update
-        for root, _, files in os.walk(previous_repo_dir):
-            for f in files:
-                path = Path(root) / f
-                rel_path = path.relative_to(previous_repo_dir)
-                with open(path, "r", encoding="utf-8", errors="ignore") as fp:
-                    content = fp.read()
-                context += f"\nFile: {rel_path}\n{content}\n"
-
-    # Include attachments info
-    attachments_info = "\n".join([f"{a['name']}: {a['url'][:80]}..." for a in attachments])
-
+    attachments = attachments or []
     prompt = f"""
-You are a code generator LLM.
+You are a software engineer LLM. Generate a project as requested:
 
-Round: {round_num}
 Brief:
 {brief}
 
 Attachments:
-{attachments_info}
+{json.dumps(attachments)}
 
-Existing files (if any):
-{context}
-
-Task: Generate the minimal set of files for this app. Return as a JSON array of objects:
-[{{"path": "file_path", "content": "file_content"}}]
 """
+    if previous_repo_dir:
+        prompt += f"\nExisting repo files: {previous_repo_dir}\nModify them as needed.\n"
 
-    # Call OpenAI Chat Completions API (1.0.0+)
-    client = openai.OpenAI()
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You generate project files."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.2,
-        max_tokens=2500,
-    )
+    prompt += "\nReturn ONLY JSON array of files: [{'path': 'file', 'content': '...'}, ...]"
 
-    text = response.choices[0].message.content
+    delay = 1
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=2500
+            )
 
-    import json
-    try:
-        files = json.loads(text)
-    except json.JSONDecodeError:
-        raise ValueError(f"LLM response could not be parsed as JSON:\n{text}")
+            text = response.choices[0].message.content.strip()
 
-    return files
+            # Parse JSON safely
+            files = json.loads(text)
+            # Ensure it's a list of dicts with required keys
+            for f in files:
+                assert "path" in f and "content" in f
+            return files
+
+        except (json.JSONDecodeError, AssertionError) as e:
+            # Try to clean LLM output
+            try:
+                text_clean = text[text.find("["):text.rfind("]")+1]
+                files = json.loads(text_clean)
+                return files
+            except Exception:
+                pass
+
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= 2
+            else:
+                raise ValueError(f"LLM response could not be parsed as JSON:\n{text}") from e
+
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= 2
+            else:
+                raise e
