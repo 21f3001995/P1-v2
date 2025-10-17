@@ -1,11 +1,11 @@
-# 🚀 LLM Code Deployment
+# LLM Code Deployment
 
 > Automated web application generation, deployment, and iteration powered by Large Language Models
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-## 📋 Overview
+## Overview
 
 LLM Code Deployment is an intelligent automation pipeline that transforms structured application briefs into fully deployed web applications. The system leverages large language models to generate, iterate, and deploy production-ready code while maintaining professional development workflows.
 
@@ -19,7 +19,7 @@ LLM Code Deployment is an intelligent automation pipeline that transforms struct
 - **Professional Documentation**: Auto-generated README files, MIT licensing, and organized project structure
 
 
-## 🎯 Features
+## Features
 
 ### 1. Intelligent Code Generation
 - Processes structured application briefs with requirements and constraints
@@ -51,7 +51,7 @@ LLM Code Deployment is an intelligent automation pipeline that transforms struct
 - Support for local testing with mock endpoints
 - Extensible plugin system for custom workflows
 
-## 🎯 How It Works
+## How It Works
 
 ### Workflow Overview
 
@@ -76,7 +76,7 @@ A typical request includes:
 The system then autonomously handles code generation, git operations, deployment, and notification - delivering a fully functional web application in minutes.
 
 
-## 🌟 Acknowledgments
+## Acknowledgments
 
 Built with modern LLM capabilities and professional development practices to enable rapid, iterative web application development.
 
