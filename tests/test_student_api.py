@@ -21,7 +21,7 @@ STUDENT_SECRET = "21f3001995-P1"
 EMAIL = "21f3001995@ds.study.iitm.ac.in"
 
 # Change task ID for each new test to avoid GitHub conflicts
-TASK_ID = "test-task-llm-debug"
+TASK_ID = "test-task-llm-debug-X2"
 
 # ---------------- ATTACHMENTS ----------------
 attachments_dir = Path("./debug_attachments")
