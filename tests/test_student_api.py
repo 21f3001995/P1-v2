@@ -15,7 +15,7 @@ from uuid import uuid4
 API_URL = "https://llm-code-deployment-6om1.onrender.com/api-endpoint"  # Your deployed Render URL
 EVAL_MOCK_URL = "https://webhook.site/c7bcc38a-d1fa-4c2f-9e5d-a8dc8775df32"  # Your webhook.site URL
 STUDENT_SECRET = "21f3001995-P1"  # Must match your config.py
-TASK_ID = "test-task-1-2"
+TASK_ID = "test-task-1-4-R1"
 EMAIL = "21f3001995@ds.study.iitm.ac.in"
 
 # ---------------- MOCK ATTACHMENTS ----------------
@@ -73,6 +73,6 @@ if __name__ == "__main__":
     send_task(1, BRIEF_R1)
 
     # Test Round 2: Update existing repo
-    send_task(2, BRIEF_R2)
+    #send_task(2, BRIEF_R2)
 
     print("\n✅ Testing finished. Check webhook.site for evaluation payloads.")

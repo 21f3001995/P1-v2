@@ -22,10 +22,10 @@ import traceback
 import requests
 import json
 
-app = FastAPI(title="LLM Code Deployment - Student API", version="1.0.0")
+app = FastAPI(title="LLM Code Deployment - Student API", version="1.1.0")
 
 # ---------------------------------------------------------------------
-# Track ongoing tasks to queue Round 2 after Round 1
+# Track ongoing tasks to avoid duplicate execution per round
 # ---------------------------------------------------------------------
 ongoing_tasks: dict[str, asyncio.Task] = {}
 
@@ -47,31 +47,38 @@ async def wait_for_pages(url: str, timeout: int = 300) -> bool:
     return False
 
 # ---------------------------------------------------------------------
-# 1️⃣ POST /api-endpoint : receive task
+# 1️⃣ POST /api-endpoint : receive task (Round 1 or Round 2)
 # ---------------------------------------------------------------------
 @app.post("/api-endpoint")
 async def receive_task(request: Request):
     data = await request.json()
 
-    # Secret verification
+    # --- Verify secret ---
     if data.get("secret") != STUDENT_SECRET:
         raise HTTPException(status_code=403, detail="Invalid secret")
 
     email = data["email"]
     task_id = data["task"]
     round_num = int(data.get("round", 1))
-    key = f"{email}:{task_id}"
 
-    # Queue Round 2 if Round 1 is still running
-    if round_num == 2 and key in ongoing_tasks:
-        task = ongoing_tasks[key]
-        if not task.done():
-            print(f"⏳ Round 2 waiting for Round 1 to finish for {key}")
-            await task
+    # Use round-specific key to avoid duplicates
+    key = f"{email}:{task_id}:{round_num}"
 
-    # Start processing the current round
+    # --- Check if this round is already running ---
+    if key in ongoing_tasks and not ongoing_tasks[key].done():
+        print(f"⚠️ Round {round_num} for {task_id} already in progress, skipping duplicate request")
+        return {
+            "status": "ok",
+            "message": f"Round {round_num} already in progress",
+            "task": task_id,
+            "round": round_num,
+        }
+
+    # --- Start background processing for this round ---
     ongoing_tasks[key] = asyncio.create_task(process_task(data))
+    print(f"📌 Round {round_num} for {task_id} started in background")
 
+    # --- Respond HTTP 200 immediately ---
     return {
         "status": "ok",
         "message": "Request received and processing started.",
