@@ -65,14 +65,6 @@ LLM Code Deployment is an intelligent automation pipeline that transforms struct
 
 5. **Evaluation Notification**: Metadata including repository URL, commit SHA, and deployment link is sent to evaluation services
 
-### Example Workflow
-
-A typical request includes:
-- **Task ID**: Unique identifier for the project
-- **Brief**: Detailed description of the application requirements
-- **Attachments**: Supporting files (CSV data, specifications, mockups)
-- **Round Number**: Enables iterative updates and refinements
-
 The system then autonomously handles code generation, git operations, deployment, and notification - delivering a fully functional web application in minutes.
 
 
