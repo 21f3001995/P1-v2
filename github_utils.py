@@ -10,7 +10,6 @@ import time
 from pathlib import Path
 from config import GITHUB_USERNAME, GITHUB_TOKEN
 
-
 # ------------------------
 # Utility: Shell runner
 # ------------------------
@@ -25,7 +24,6 @@ def run(cmd, cwd=None, check=True):
     if check and result.returncode != 0:
         raise RuntimeError(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
     return result
-
 
 # ------------------------
 # Round 1: Create new repo
@@ -47,7 +45,6 @@ def create_repo_round1(repo_name: str, local_path: Path):
     # --- Create GitHub repository ---
     payload = {"name": repo_name, "private": False, "auto_init": False}
     r = requests.post("https://api.github.com/user/repos", json=payload, headers=headers)
-
     if r.status_code not in (200, 201):
         if "already exists" not in r.text.lower():
             raise Exception(f"❌ GitHub repo creation failed: {r.status_code} {r.text}")
@@ -58,7 +55,7 @@ def create_repo_round1(repo_name: str, local_path: Path):
     run(["git", "init"], cwd=local_path)
     run(["git", "branch", "-M", "main"], cwd=local_path)
     run(["git", "config", "user.name", GITHUB_USERNAME], cwd=local_path)
-    run(["git", "config", "user.email", "21f3001995@ds.study.iitm.ac.in"], cwd=local_path)
+    run(["git", "config", "user.email", f"{GITHUB_USERNAME}@users.noreply.github.com"], cwd=local_path)
     run(["git", "add", "."], cwd=local_path)
     run(["git", "commit", "-m", "Initial commit"], cwd=local_path)
     run(["git", "remote", "add", "origin", remote_url], cwd=local_path)
@@ -68,20 +65,22 @@ def create_repo_round1(repo_name: str, local_path: Path):
     pages_api_url = f"https://api.github.com/repos/{GITHUB_USERNAME}/{repo_name}/pages"
     pages_payload = {"source": {"branch": "main", "path": "/"}}
     r_pages = requests.post(pages_api_url, headers=headers, json=pages_payload)
-
     if r_pages.status_code not in (201, 204):
         print(f"⚠️ Pages activation warning ({r_pages.status_code}): {r_pages.text}")
     else:
         print("🌍 GitHub Pages activated. Waiting for it to go live...")
-        time.sleep(5)
-        try:
-            resp = requests.get(pages_url)
-            if resp.status_code == 200:
-                print(f"✅ GitHub Pages live: {pages_url}")
-            else:
-                print(f"⚠️ Pages URL returned status {resp.status_code}")
-        except Exception as e:
-            print(f"⚠️ Error checking Pages URL: {e}")
+        # Wait until Pages responds with 200 or timeout after 30s
+        for _ in range(6):
+            try:
+                resp = requests.get(pages_url)
+                if resp.status_code == 200:
+                    print(f"✅ GitHub Pages live: {pages_url}")
+                    break
+            except Exception:
+                pass
+            time.sleep(5)
+        else:
+            print(f"⚠️ Pages URL not live after 30s: {pages_url}")
 
     # --- Get latest commit SHA ---
     result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=local_path, capture_output=True, text=True)
@@ -89,7 +88,6 @@ def create_repo_round1(repo_name: str, local_path: Path):
 
     print(f"✅ Round 1 completed — Commit: {commit_sha}")
     return repo_name, commit_sha, pages_url
-
 
 # ------------------------
 # Round 2: Update repo
@@ -107,6 +105,7 @@ def update_repo_round2(repo_name: str, local_path: Path):
     if tmp_clone.exists():
         shutil.rmtree(tmp_clone)
 
+    # --- Clone latest repo ---
     run(["git", "clone", remote_url, str(tmp_clone)])
 
     # --- Copy updated files ---
@@ -123,9 +122,9 @@ def update_repo_round2(repo_name: str, local_path: Path):
 
     # --- Git config ---
     run(["git", "config", "user.name", GITHUB_USERNAME], cwd=tmp_clone)
-    run(["git", "config", "user.email", "21f3001995@ds.study.iitm.ac.in"], cwd=tmp_clone)
+    run(["git", "config", "user.email", f"{GITHUB_USERNAME}@ds.study.iitm.ac.in"], cwd=tmp_clone)
 
-    # --- Check for changes ---
+    # --- Commit only if there are changes ---
     status = subprocess.run(["git", "status", "--porcelain"], cwd=tmp_clone, capture_output=True, text=True)
     if status.stdout.strip():
         run(["git", "add", "."], cwd=tmp_clone)
@@ -134,19 +133,22 @@ def update_repo_round2(repo_name: str, local_path: Path):
     else:
         print("ℹ️ No changes detected; skipping commit.")
 
-    # --- Pull + push updates ---
+    # --- Pull + push ---
     run(["git", "pull", "--rebase", "origin", "main"], cwd=tmp_clone, check=False)
     run(["git", "push", "origin", "main"], cwd=tmp_clone, check=False)
 
-    # --- Verify GitHub Pages ---
-    try:
-        resp = requests.get(pages_url)
-        if resp.status_code == 200:
-            print(f"✅ GitHub Pages live: {pages_url}")
-        else:
-            print(f"⚠️ Pages URL returned status {resp.status_code}")
-    except Exception as e:
-        print(f"⚠️ Error checking Pages URL: {e}")
+    # --- Wait until Pages is live ---
+    for _ in range(6):
+        try:
+            resp = requests.get(pages_url)
+            if resp.status_code == 200:
+                print(f"✅ GitHub Pages live: {pages_url}")
+                break
+        except Exception:
+            pass
+        time.sleep(5)
+    else:
+        print(f"⚠️ Pages URL not live after update: {pages_url}")
 
     # --- Get latest commit SHA ---
     result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_clone, capture_output=True, text=True)
@@ -154,7 +156,6 @@ def update_repo_round2(repo_name: str, local_path: Path):
 
     print(f"✅ Round 2 completed — Commit: {commit_sha}")
     return repo_name, commit_sha, pages_url
-
 
 # ------------------------
 # Wrapper: Auto select round
