@@ -1,18 +1,14 @@
-"""
-LLM Generator for LLM Code Deployment
--------------------------------------
-Generates project files based on task brief + attachments.
-Supports round_num for Round 1 vs Round 2 variations.
-"""
-
 from llm_client import generate_files_from_brief
 from pathlib import Path
 import os
 import base64
+import shutil
 
 def generate_app_from_brief(brief: str, attachments_dir: Path, repo_dir: Path, round_num: int = 1):
     """
-    Generates all files for the project using LLM and saves them to repo_dir.
+    Generates or updates project files using LLM, considering round number.
+    - Round 1: initial creation
+    - Round 2: incremental updates / modifications
     """
     # Convert attachments folder into JSON objects with base64 URLs
     attachments = []
@@ -27,17 +23,27 @@ def generate_app_from_brief(brief: str, attachments_dir: Path, repo_dir: Path, r
             mime = "application/json"
         attachments.append({"name": f, "url": f"data:{mime};base64,{b64}"})
 
-    # Generate files via LLM
-    files = generate_files_from_brief(brief, attachments, round_num=round_num)
+    if round_num == 1:
+        # Round 1: initial generation
+        files = generate_files_from_brief(brief, attachments)
+    else:
+        # Round 2: incremental updates
+        # Backup current repo
+        backup_dir = repo_dir / f"_backup_round{round_num-1}"
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        shutil.copytree(repo_dir, backup_dir, dirs_exist_ok=True)
 
-    # Save files to repo_dir
+        # Call LLM with previous repo context for incremental updates
+        files = generate_files_from_brief(
+            brief,
+            attachments,
+            previous_repo_dir=repo_dir
+        )
+
+    # Save/update files to repo_dir
     for file in files:
         path = repo_dir / file["path"]
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as fp:
             fp.write(file["content"])
-
-    # Log generated files
-    print("✨ Generated files:")
-    for file in files:
-        print(f"- {file['path']} ({len(file['content'])} chars)")

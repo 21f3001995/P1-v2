@@ -1,11 +1,11 @@
 """
 Project: LLM Code Deployment (Student API)
 ------------------------------------------
-FastAPI app to:
-1. Receive task requests (Round 1/2)
-2. Generate/update apps via LLM
-3. Push to GitHub and deploy Pages
-4. Notify evaluation API
+FastAPI app for student-side workflow:
+1. Receives task requests (Round 1/2)
+2. Generates/upgrades apps using LLM
+3. Pushes to GitHub and deploys GitHub Pages
+4. Notifies evaluation API
 """
 
 from fastapi import FastAPI, Request, HTTPException
@@ -24,25 +24,19 @@ import json
 
 app = FastAPI(title="LLM Code Deployment - Student API", version="1.0.0")
 
-
 # ---------------------------------------------------------------------
-# 🧩 1. POST /api-endpoint : receive task
+# 1️⃣ POST /api-endpoint : receive task
 # ---------------------------------------------------------------------
 @app.post("/api-endpoint")
 async def receive_task(request: Request):
-    """
-    Accept POST JSON with fields:
-    email, secret, task, round, nonce, brief, evaluation_url, attachments, checks
-    Verifies secret and starts async build/update job.
-    """
     try:
         data = await request.json()
 
-        # 🔒 Secret verification
+        # Secret verification
         if data.get("secret") != STUDENT_SECRET:
             raise HTTPException(status_code=403, detail="Invalid secret")
 
-        # Spawn async job so HTTP response returns immediately
+        # Async process task
         asyncio.create_task(process_task(data))
 
         return {
@@ -56,9 +50,8 @@ async def receive_task(request: Request):
         traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(e))
 
-
 # ---------------------------------------------------------------------
-# 🧠 2. process_task(): core logic
+# 2️⃣ process_task(): core logic
 # ---------------------------------------------------------------------
 async def process_task(data: dict):
     try:
@@ -73,32 +66,32 @@ async def process_task(data: dict):
 
         print(f"\n🚀 Starting Round {round_num} for {task_id} ({email})")
 
-        # Step 1: create workspace
+        # Create workspace
         repo_folder = BASE_REPO_DIR / f"{task_id}_{nonce}_app"
         if repo_folder.exists():
             shutil.rmtree(repo_folder)
         repo_folder.mkdir(parents=True, exist_ok=True)
 
-        # Step 2: save attachments
+        # Save attachments
         attachments_dir = repo_folder / "attachments"
         saved_files = save_attachments(attachments, attachments_dir)
         print(f"📎 Saved {len(saved_files)} attachments.")
 
-        # Step 3: generate/update project files via LLM
+        # Generate/update project files
         generate_app_from_brief(brief, attachments_dir, repo_folder, round_num=round_num)
         print("✨ LLM generation completed.")
 
-        # Step 4: add LICENSE + README.md
+        # Add LICENSE + README.md
         (repo_folder / "LICENSE").write_text("MIT License\n")
         readme_text = f"# {task_id}\n\n## Brief\n{brief}\n\n## Checks\n" + \
                       "\n".join([f"- {c}" for c in checks]) + "\n\nMIT License."
         (repo_folder / "README.md").write_text(readme_text)
 
-        # Step 5: create/update GitHub repo & enable Pages
+        # Create/update repo on GitHub
         repo_name, commit_sha, pages_url = create_or_update_repo(task_id, repo_folder, round_num)
         print(f"✅ GitHub push complete: {repo_name} @ {commit_sha}")
 
-        # Step 6: notify instructor evaluation_url
+        # Notify instructor evaluation_url
         await notify_evaluation_api(
             evaluation_url=evaluation_url,
             email=email,
@@ -116,9 +109,8 @@ async def process_task(data: dict):
         print("❌ process_task() failed:", e)
         traceback.print_exc()
 
-
 # ---------------------------------------------------------------------
-# 📨 3. Notify instructor evaluation_url
+# 3️⃣ Notify instructor evaluation_url
 # ---------------------------------------------------------------------
 async def notify_evaluation_api(evaluation_url, email, task_id, round_num, nonce,
                                 repo_name, commit_sha, pages_url):
@@ -156,23 +148,18 @@ async def notify_evaluation_api(evaluation_url, email, task_id, round_num, nonce
 
     print("❌ All notify attempts failed.")
 
-
 # ---------------------------------------------------------------------
-# 🧪 4. Mock evaluation endpoint (local testing)
+# 4️⃣ Mock evaluation endpoint (local testing)
 # ---------------------------------------------------------------------
 @app.post("/eval-mock")
 async def eval_mock(request: Request):
-    """
-    Local mock of instructor evaluation_url
-    """
     data = await request.json()
     print("\n🧪 Eval mock received:")
     print(json.dumps(data, indent=2))
     return {"status": "received", "round": data.get("round", "N/A")}
 
-
 # ---------------------------------------------------------------------
-# ❤️ 5. Health check
+# 5️⃣ Health check
 # ---------------------------------------------------------------------
 @app.get("/health")
 def health():
