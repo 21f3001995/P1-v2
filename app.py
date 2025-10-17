@@ -1,11 +1,11 @@
 """
 Project: LLM Code Deployment (Student API)
 ------------------------------------------
-This FastAPI app implements the student-side server that:
-1. Receives and verifies task requests (Round 1 or 2)
-2. Uses an LLM generator to build or update an app
-3. Pushes to GitHub and deploys GitHub Pages
-4. Notifies the instructor’s evaluation_url with repo metadata
+FastAPI app to:
+1. Receive task requests (Round 1/2)
+2. Generate/update apps via LLM
+3. Push to GitHub and deploy Pages
+4. Notify evaluation API
 """
 
 from fastapi import FastAPI, Request, HTTPException
@@ -21,7 +21,6 @@ import shutil
 import traceback
 import requests
 import json
-import time
 
 app = FastAPI(title="LLM Code Deployment - Student API", version="1.0.0")
 
@@ -32,8 +31,8 @@ app = FastAPI(title="LLM Code Deployment - Student API", version="1.0.0")
 @app.post("/api-endpoint")
 async def receive_task(request: Request):
     """
-    Accepts POST JSON with fields:
-      email, secret, task, round, nonce, brief, evaluation_url, attachments, checks
+    Accept POST JSON with fields:
+    email, secret, task, round, nonce, brief, evaluation_url, attachments, checks
     Verifies secret and starts async build/update job.
     """
     try:
@@ -43,7 +42,7 @@ async def receive_task(request: Request):
         if data.get("secret") != STUDENT_SECRET:
             raise HTTPException(status_code=403, detail="Invalid secret")
 
-        # Spawn async job so the HTTP response returns immediately
+        # Spawn async job so HTTP response returns immediately
         asyncio.create_task(process_task(data))
 
         return {
@@ -62,17 +61,8 @@ async def receive_task(request: Request):
 # 🧠 2. process_task(): core logic
 # ---------------------------------------------------------------------
 async def process_task(data: dict):
-    """
-    Handles building or updating the app based on round number.
-    Steps:
-      1. Save attachments
-      2. Generate or update project using LLM
-      3. Push to GitHub and enable Pages
-      4. Notify instructor via evaluation_url
-    """
     try:
         email = data["email"]
-        secret = data["secret"]
         task_id = data["task"]
         round_num = int(data.get("round", 1))
         nonce = data.get("nonce", str(uuid4()))
@@ -94,7 +84,7 @@ async def process_task(data: dict):
         saved_files = save_attachments(attachments, attachments_dir)
         print(f"📎 Saved {len(saved_files)} attachments.")
 
-        # Step 3: generate or update project files
+        # Step 3: generate/update project files via LLM
         generate_app_from_brief(brief, attachments_dir, repo_folder, round_num=round_num)
         print("✨ LLM generation completed.")
 
@@ -104,11 +94,11 @@ async def process_task(data: dict):
                       "\n".join([f"- {c}" for c in checks]) + "\n\nMIT License."
         (repo_folder / "README.md").write_text(readme_text)
 
-        # Step 5: create or update repo on GitHub
+        # Step 5: create/update GitHub repo & enable Pages
         repo_name, commit_sha, pages_url = create_or_update_repo(task_id, repo_folder, round_num)
         print(f"✅ GitHub push complete: {repo_name} @ {commit_sha}")
 
-        # Step 6: notify instructor’s evaluation_url
+        # Step 6: notify instructor evaluation_url
         await notify_evaluation_api(
             evaluation_url=evaluation_url,
             email=email,
@@ -132,10 +122,6 @@ async def process_task(data: dict):
 # ---------------------------------------------------------------------
 async def notify_evaluation_api(evaluation_url, email, task_id, round_num, nonce,
                                 repo_name, commit_sha, pages_url):
-    """
-    Sends repo + commit metadata to instructor evaluation API.
-    Retries on failure with exponential backoff.
-    """
     payload = {
         "email": email,
         "task": task_id,
@@ -177,8 +163,7 @@ async def notify_evaluation_api(evaluation_url, email, task_id, round_num, nonce
 @app.post("/eval-mock")
 async def eval_mock(request: Request):
     """
-    Local mock of the instructor’s evaluation_url.
-    Prints payload and returns HTTP 200.
+    Local mock of instructor evaluation_url
     """
     data = await request.json()
     print("\n🧪 Eval mock received:")
@@ -194,5 +179,5 @@ def health():
     return {"status": "ok", "project": "LLM Code Deployment"}
 
 @app.get("/")
-def health():
+def root():
     return {"status": "ok", "project": "LLM Code Deployment"}
