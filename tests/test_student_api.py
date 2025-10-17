@@ -1,59 +1,71 @@
+"""
+test_student_api.py
+-------------------
+Test script for LLM Code Deployment Student API.
+Simulates both Round 1 and Round 2 requests, prints evaluation JSON.
+"""
+
 import requests
 import json
-import uuid
+import base64
+from pathlib import Path
+from uuid import uuid4
 
-# ----------------------------
-# Configuration
-# ----------------------------
-API_URL = "https://llm-code-deployment-6om1.onrender.com/api-endpoint"  # your Render URL
-EVAL_URL = "http://127.0.0.1:9000/notify"  # local mock evaluation
-SECRET = "21f3001995-P1"
+# ---------------- CONFIG ----------------
+API_URL = "https://llm-code-deployment-6om1.onrender.com/api-endpoint"  # Change to your deployed Render URL if needed
+EVAL_MOCK_URL = "https://webhook.site/c7bcc38a-d1fa-4c2f-9e5d-a8dc8775df32"  # Use your own webhook.site URL to capture evals
+STUDENT_SECRET = "21f3001995-P1"  # must match your config.py
+TASK_ID = "test-task-1-1"
 EMAIL = "21f3001995@ds.study.iitm.ac.in"
-TASK_ID = "test-task-1.1"
 
-# Sample attachment (can be empty or a small dummy file)
-ATTACHMENTS = [
-    {"name": "sample.txt", "url": "data:text/plain;base64,SGVsbG8gd29ybGQh"}  # "Hello world!"
-]
+# ---------------- MOCK ATTACHMENTS ----------------
+attachments_dir = Path("./sample_attachments")
+attachments_dir.mkdir(exist_ok=True)
 
-CHECKS = [
-    "Repo has MIT license",
-    "README.md is professional",
-    "Page displays captcha URL passed at ?url=...",
-    "Page displays solved captcha text within 15 seconds"
-]
+# Create a sample CSV for testing
+(sample_csv := attachments_dir / "data.csv").write_text("product,sales\nA,100\nB,200")
 
-BRIEF = "Create a minimal app for testing Round 1"
+def encode_attachments():
+    files = []
+    for f in attachments_dir.iterdir():
+        with open(f, "rb") as fp:
+            b64 = base64.b64encode(fp.read()).decode()
+        mime = "text/csv" if f.suffix == ".csv" else "application/octet-stream"
+        files.append({"name": f.name, "url": f"data:{mime};base64,{b64}"})
+    return files
 
-# ----------------------------
-# Helper function
-# ----------------------------
-def send_task(round_num, brief):
-    nonce = str(uuid.uuid4())
+BRIEF = "Generate a simple HTML page that displays the sum of sales in #total-sales."
+
+# ---------------- HELPER ----------------
+def send_task(round_num: int, brief: str):
+    nonce = str(uuid4())
     payload = {
         "email": EMAIL,
-        "secret": SECRET,
+        "secret": STUDENT_SECRET,
         "task": TASK_ID,
         "round": round_num,
         "nonce": nonce,
         "brief": brief,
-        "evaluation_url": EVAL_URL,
-        "attachments": ATTACHMENTS,
-        "checks": CHECKS
+        "evaluation_url": EVAL_MOCK_URL,
+        "attachments": encode_attachments(),
+        "checks": ["Repo has MIT license", "README.md is professional"]
     }
 
     print(f"\n🚀 Sending Round {round_num} request...")
-    resp = requests.post(API_URL, json=payload)
+    resp = requests.post(API_URL, json=payload, timeout=30)
     print("Status:", resp.status_code)
-    print(resp.json())
+    try:
+        print(json.dumps(resp.json(), indent=2))
+    except Exception:
+        print("Response content:", resp.text)
 
-# ----------------------------
-# Run tests
-# ----------------------------
+
 if __name__ == "__main__":
-    # Round 1: build
+    # Test Round 1 (Create new repo)
     send_task(1, BRIEF)
 
-    # Round 2: revision
-    BRIEF2 = "Update the app for Round 2 testing"
-    send_task(2, BRIEF2)
+    # Test Round 2 (Update existing repo)
+    BRIEF_R2 = "Update the page to show a table #product-sales with all products and their sales."
+    send_task(2, BRIEF_R2)
+
+    print("\n✅ Local testing finished. Check /eval-mock logs for JSON payloads.")

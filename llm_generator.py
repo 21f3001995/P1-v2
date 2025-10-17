@@ -1,16 +1,21 @@
 from llm_client import generate_files_from_brief
 from pathlib import Path
-import os
-import base64
-import shutil
 
-def generate_app_from_brief(brief: str, attachments_dir: Path, repo_dir: Path, round_num: int = 1):
+def generate_app_from_brief(
+    brief: str,
+    attachments_dir: Path,
+    repo_dir: Path,
+    round_num: int = 1,
+    previous_repo_dir: Path = None
+):
     """
-    Generates or updates project files using LLM, considering round number.
-    - Round 1: initial creation
-    - Round 2: incremental updates / modifications
+    Generate or update the app from brief.
+    Saves all files into repo_dir.
     """
-    # Convert attachments folder into JSON objects with base64 URLs
+
+    import os
+
+    # Convert attachments folder to list of dicts
     attachments = []
     for f in os.listdir(attachments_dir):
         path = attachments_dir / f
@@ -23,25 +28,15 @@ def generate_app_from_brief(brief: str, attachments_dir: Path, repo_dir: Path, r
             mime = "application/json"
         attachments.append({"name": f, "url": f"data:{mime};base64,{b64}"})
 
-    if round_num == 1:
-        # Round 1: initial generation
-        files = generate_files_from_brief(brief, attachments)
-    else:
-        # Round 2: incremental updates
-        # Backup current repo
-        backup_dir = repo_dir / f"_backup_round{round_num-1}"
-        if backup_dir.exists():
-            shutil.rmtree(backup_dir)
-        shutil.copytree(repo_dir, backup_dir, dirs_exist_ok=True)
+    # Generate files from LLM
+    files = generate_files_from_brief(
+        brief,
+        attachments,
+        round_num=round_num,
+        previous_repo_dir=previous_repo_dir
+    )
 
-        # Call LLM with previous repo context for incremental updates
-        files = generate_files_from_brief(
-            brief,
-            attachments,
-            previous_repo_dir=repo_dir
-        )
-
-    # Save/update files to repo_dir
+    # Save files
     for file in files:
         path = repo_dir / file["path"]
         path.parent.mkdir(parents=True, exist_ok=True)
