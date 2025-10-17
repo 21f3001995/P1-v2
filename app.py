@@ -2,14 +2,14 @@
 Project: LLM Code Deployment (Student API)
 ------------------------------------------
 FastAPI app for student-side workflow:
-1. Receives task requests (Round 1/2)
-2. Generates/upgrades apps using LLM
+1. Receives task requests (Round 1 / Round 2)
+2. Generates or upgrades apps using LLM
 3. Pushes to GitHub and deploys GitHub Pages
 4. Notifies evaluation API
 """
 
 from fastapi import FastAPI, Request, HTTPException
-from config import STUDENT_SECRET, BASE_REPO_DIR, GITHUB_USERNAME
+from config import STUDENT_SECRET, BASE_REPO_DIR, GITHUB_USERNAME, DEBUG_MODE
 from github_utils import create_or_update_repo
 from llm_generator import generate_app_from_brief
 from attachment_utils import save_attachments
@@ -17,24 +17,21 @@ from attachment_utils import save_attachments
 from pathlib import Path
 from uuid import uuid4
 import asyncio
-import shutil
 import traceback
 import requests
 import json
+import httpx
 
-app = FastAPI(title="LLM Code Deployment - Student API", version="1.1.0")
+app = FastAPI(title="LLM Code Deployment - Student API", version="1.2.0")
 
-# ---------------------------------------------------------------------
-# Track ongoing tasks to avoid duplicate execution per round
-# ---------------------------------------------------------------------
+# Track ongoing tasks to avoid duplicate processing per round
 ongoing_tasks: dict[str, asyncio.Task] = {}
 
 # ---------------------------------------------------------------------
-# Helper: Wait for GitHub Pages to go live
+# Helper: Wait for GitHub Pages to become live
 # ---------------------------------------------------------------------
 async def wait_for_pages(url: str, timeout: int = 300) -> bool:
-    """Wait until GitHub Pages is live (HTTP 200) or timeout in seconds."""
-    import httpx
+    """Wait until GitHub Pages returns HTTP 200 or timeout."""
     start = asyncio.get_event_loop().time()
     while asyncio.get_event_loop().time() - start < timeout:
         try:
@@ -47,13 +44,13 @@ async def wait_for_pages(url: str, timeout: int = 300) -> bool:
     return False
 
 # ---------------------------------------------------------------------
-# 1️⃣ POST /api-endpoint : receive task (Round 1 or Round 2)
+# 1️⃣ POST /api-endpoint — receive round request
 # ---------------------------------------------------------------------
 @app.post("/api-endpoint")
 async def receive_task(request: Request):
     data = await request.json()
 
-    # --- Verify secret ---
+    # Validate secret
     if data.get("secret") != STUDENT_SECRET:
         raise HTTPException(status_code=403, detail="Invalid secret")
 
@@ -61,24 +58,21 @@ async def receive_task(request: Request):
     task_id = data["task"]
     round_num = int(data.get("round", 1))
 
-    # Use round-specific key to avoid duplicates
     key = f"{email}:{task_id}:{round_num}"
-
-    # --- Check if this round is already running ---
     if key in ongoing_tasks and not ongoing_tasks[key].done():
-        print(f"⚠️ Round {round_num} for {task_id} already in progress, skipping duplicate request")
+        print(f"⚠️ Round {round_num} for {task_id} already in progress.")
         return {
             "status": "ok",
-            "message": f"Round {round_num} already in progress",
+            "message": f"Round {round_num} already in progress.",
             "task": task_id,
             "round": round_num,
         }
 
-    # --- Start background processing for this round ---
+    # Background processing
     ongoing_tasks[key] = asyncio.create_task(process_task(data))
-    print(f"📌 Round {round_num} for {task_id} started in background")
+    print(f"📌 Round {round_num} for {task_id} started in background.")
 
-    # --- Respond HTTP 200 immediately ---
+    # Immediate 200 response
     return {
         "status": "ok",
         "message": "Request received and processing started.",
@@ -87,7 +81,7 @@ async def receive_task(request: Request):
     }
 
 # ---------------------------------------------------------------------
-# 2️⃣ process_task(): core logic
+# 2️⃣ Core task handler
 # ---------------------------------------------------------------------
 async def process_task(data: dict):
     try:
@@ -100,38 +94,69 @@ async def process_task(data: dict):
         attachments = data.get("attachments", [])
         checks = data.get("checks", [])
 
-        print(f"\n🚀 Starting Round {round_num} for {task_id} ({email})")
+        print(f"\n🚀 Processing Round {round_num} for {task_id} ({email})")
 
-        # Use consistent workspace for same task + nonce
+        # Setup repo folder
         repo_folder = BASE_REPO_DIR / f"{task_id}_{nonce}_app"
         repo_folder.mkdir(parents=True, exist_ok=True)
 
-        # Save attachments
+        # Save attachments inside a subfolder only (no root duplication)
         attachments_dir = repo_folder / "attachments"
         saved_files = save_attachments(attachments, attachments_dir)
-        print(f"📎 Saved {len(saved_files)} attachments.")
+        print(f"📎 Saved {len(saved_files)} attachment(s) in {attachments_dir}")
 
-        # Generate/update project files
+        # Generate code from LLM
         generate_app_from_brief(brief, attachments_dir, repo_folder, round_num=round_num)
         print("✨ LLM generation completed.")
 
-        # Add LICENSE + README.md
+        # Write LICENSE
         (repo_folder / "LICENSE").write_text("MIT License\n")
-        readme_text = f"# {task_id}\n\n## Brief\n{brief}\n\n## Checks\n" + \
-                      "\n".join([f"- {c}" for c in checks]) + "\n\nMIT License."
-        (repo_folder / "README.md").write_text(readme_text)
 
-        # Create/update repo on GitHub
+        # Professional README.md
+        readme_path = repo_folder / "README.md"
+        if round_num == 1 or not readme_path.exists():
+            readme_text = f"""# {task_id}
+
+This repository was automatically generated using the **LLM Code Deployment Student API**.
+
+---
+
+## 📘 Project Brief
+{brief}
+
+## ✅ Evaluation Checks
+{"".join([f"- {c}\n" for c in checks])}
+
+## 🧩 Attachments
+Included under the `/attachments` directory.
+
+## ⚙️ Deployment
+- GitHub Pages is automatically enabled on the `main` branch.
+- Any update pushed to this repository triggers a live rebuild.
+
+## 📜 License
+MIT License © IITM Online Degree - Tools for Data Science Project
+"""
+        else:
+            # Round 2 — append note at the end instead of overwriting
+            old_content = readme_path.read_text()
+            readme_text = (
+                old_content
+                + f"\n\n---\n### 🔁 Round {round_num} Update\n{brief}\n"
+            )
+        readme_path.write_text(readme_text)
+
+        # Push to GitHub
         repo_name, commit_sha, pages_url = create_or_update_repo(task_id, repo_folder, round_num)
         print(f"✅ GitHub push complete: {repo_name} @ {commit_sha}")
 
-        # Wait for Pages to go live
+        # Wait for GitHub Pages to go live
         if await wait_for_pages(pages_url):
-            print(f"🌐 Pages live at {pages_url}")
+            print(f"🌐 GitHub Pages live at {pages_url}")
         else:
-            print(f"⚠️ Pages did not go live within timeout, notifying anyway.")
+            print("⚠️ Pages did not go live within timeout. Continuing anyway.")
 
-        # Notify evaluation API
+        # Notify evaluator
         await notify_evaluation_api(
             evaluation_url=evaluation_url,
             email=email,
@@ -143,14 +168,14 @@ async def process_task(data: dict):
             pages_url=pages_url,
         )
 
-        print(f"🏁 Round {round_num} completed successfully.\n")
+        print(f"🏁 Round {round_num} for {task_id} completed successfully.\n")
 
     except Exception as e:
         print("❌ process_task() failed:", e)
         traceback.print_exc()
 
 # ---------------------------------------------------------------------
-# 3️⃣ Notify instructor evaluation_url
+# 3️⃣ Notify evaluation API
 # ---------------------------------------------------------------------
 async def notify_evaluation_api(evaluation_url, email, task_id, round_num, nonce,
                                 repo_name, commit_sha, pages_url):
@@ -175,7 +200,7 @@ async def notify_evaluation_api(evaluation_url, email, task_id, round_num, nonce
             )
 
             if response.status_code == 200:
-                print("✅ Evaluation API acknowledged.")
+                print("✅ Evaluation API acknowledged successfully.")
                 return
             else:
                 print(f"⚠️ Evaluation API returned {response.status_code}: {response.text}")
@@ -189,17 +214,17 @@ async def notify_evaluation_api(evaluation_url, email, task_id, round_num, nonce
     print("❌ All notify attempts failed.")
 
 # ---------------------------------------------------------------------
-# 4️⃣ Mock evaluation endpoint (local testing)
+# 4️⃣ Optional: Mock evaluator (for local testing)
 # ---------------------------------------------------------------------
 @app.post("/eval-mock")
 async def eval_mock(request: Request):
     data = await request.json()
-    print("\n🧪 Eval mock received:")
+    print("\n🧪 Mock evaluator received:")
     print(json.dumps(data, indent=2))
     return {"status": "received", "round": data.get("round", "N/A")}
 
 # ---------------------------------------------------------------------
-# 5️⃣ Health check
+# 5️⃣ Health check routes
 # ---------------------------------------------------------------------
 @app.get("/health")
 def health():
