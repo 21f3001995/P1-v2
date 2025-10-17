@@ -189,6 +189,10 @@ async def eval_mock(request: Request):
 # ---------------------------------------------------------------------
 # ❤️ 5. Health check
 # ---------------------------------------------------------------------
+@app.get("/health")
+def health():
+    return {"status": "ok", "project": "LLM Code Deployment"}
+
 @app.get("/")
 def health():
     return {"status": "ok", "project": "LLM Code Deployment"}

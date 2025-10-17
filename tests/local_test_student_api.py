@@ -1,90 +1,80 @@
-"""
-Local test script for student LLM Code Deployment API.
-------------------------------------------------------
-This script simulates professor requests for Round 1 and Round 2.
-Ensure your FastAPI app is running locally at http://127.0.0.1:8000
-
-Usage:
-    python local_test_student_api.py
-"""
-
-import base64
-import json
-import requests
+# local_test_full.py
+import threading
 import time
-from pathlib import Path
+import json
+from fastapi import FastAPI, Request
+import uvicorn
+import requests
 
-# -------------------------------
-# CONFIGURATION
-# -------------------------------
-API_URL = "http://127.0.0.1:8000/api-endpoint"   # local FastAPI endpoint
-STUDENT_SECRET = "21f3001995-P1"      # must match .env
-EVALUATION_URL = "http://127.0.0.1:9999/dummy"    # dummy callback endpoint
-TEST_FILE = "sample_for_LocalTesting.txt"
+# ---------- MOCK EVALUATION SERVER ----------
+eval_app = FastAPI()
 
-# -------------------------------
-# HELPER: Base64 encode file
-# -------------------------------
-def encode_file(filepath: str):
-    with open(filepath, "rb") as f:
-        data = f.read()
-    b64 = base64.b64encode(data).decode("utf-8")
-    return f"data:text/plain;base64,{b64}"
+received_evals = []
 
-# -------------------------------
-# 1️⃣ CREATE A DUMMY ATTACHMENT
-# -------------------------------
-Path(TEST_FILE).write_text("This is a dummy file for local Round 1 test.\n")
+@eval_app.post("/mock-eval")
+async def mock_eval(request: Request):
+    data = await request.json()
+    print(f"\n📨 Evaluation received:\n{json.dumps(data, indent=2)}\n")
+    received_evals.append(data)
+    return {"status": "ok"}
 
-# -------------------------------
-# 2️⃣ PREPARE ROUND 1 PAYLOAD
-# -------------------------------
-round1_payload = {
-    "secret": STUDENT_SECRET,
+def start_eval_mock():
+    uvicorn.run(eval_app, host="127.0.0.1", port=8001, log_level="info")
+
+# Run mock evaluation server in background
+threading.Thread(target=start_eval_mock, daemon=True).start()
+time.sleep(1)  # wait for server to start
+
+# ---------- CONFIG ----------
+STUDENT_API_URL = "http://127.0.0.1:8000/api-endpoint"
+evaluation_url = "http://127.0.0.1:8000/eval-mock"
+SECRET = "21f3001995-P1"  # must match what app.py expects
+EMAIL = "21f3001995@ds.study.iitm.ac.in"
+
+# ---------- TASK TEMPLATES ----------
+round1_task = {
+    "email": EMAIL,
+    "secret": SECRET,
+    "task": "test-task-1",
     "round": 1,
-    "email":"21f3001995@ds.study.iitm.ac.in",
-    "task_id": "local_task_001",
-    "evaluation_url": EVALUATION_URL,
-    "brief": "Create a simple HTML page with a blue title 'Hello Local Test'.",
-    "attachments": [encode_file(TEST_FILE)]
-}
-
-print("\n🚀 Sending Round 1 request...")
-r1 = requests.post(API_URL, json=round1_payload)
-print(f"Status: {r1.status_code}")
-try:
-    print(json.dumps(r1.json(), indent=2))
-except Exception:
-    print(r1.text)
-
-# -------------------------------
-# 3️⃣ WAIT THEN DO ROUND 2 UPDATE
-# -------------------------------
-time.sleep(3)
-
-round2_payload = {
-    "secret": STUDENT_SECRET,
-    "round": 2,
-    "email":"21f3001995@ds.study.iitm.ac.in",
-    "task_id": "local_task_001",
-    "evaluation_url": EVALUATION_URL,
-    "brief": "Update the HTML to include current time and a random quote.",
+    "nonce": "nonce-123",
+    "brief": "Create a test page displaying Hello World",
+    "checks": ["Page loads", "Displays Hello World"],
+    "evaluation_url": evaluation_url,
     "attachments": []
 }
 
-print("\n🔁 Sending Round 2 request...")
-r2 = requests.post(API_URL, json=round2_payload)
-print(f"Status: {r2.status_code}")
-try:
-    print(json.dumps(r2.json(), indent=2))
-except Exception:
-    print(r2.text)
+round2_task = {
+    "email": EMAIL,
+    "secret": SECRET,
+    "task": "test-task-1",
+    "round": 2,
+    "nonce": "nonce-123",
+    "brief": "Update page to display Hello Render",
+    "checks": ["Page loads", "Displays Hello Render"],
+    "evaluation_url": evaluation_url,
+    "attachments": []
+}
 
-# -------------------------------
-# ✅ RESULT SUMMARY
-# -------------------------------
+# ---------- SEND TASKS ----------
+def send_task(task):
+    print(f"🚀 Sending Round {task['round']} request...")
+    r = requests.post(STUDENT_API_URL, json=task)
+    print(f"Status: {r.status_code}")
+    try:
+        print(r.json())
+    except Exception:
+        print(r.text)
+
+send_task(round1_task)
+time.sleep(5)  # wait for Round 1 processing
+
+send_task(round2_task)
+time.sleep(5)  # wait for Round 2 processing
+
 print("\n✅ Local test finished.")
 print("Check:")
 print(" - repos/ directory for generated repo folders")
 print(" - GitHub account for new/updated repository")
 print(" - FastAPI logs for internal actions")
+print(" - Evaluation server console for received POSTs")
