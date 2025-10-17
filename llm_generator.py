@@ -1,5 +1,8 @@
 from llm_client import generate_files_from_brief
 from pathlib import Path
+import base64
+import os
+
 
 def generate_app_from_brief(
     brief: str,
