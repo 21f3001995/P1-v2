@@ -12,9 +12,9 @@ from pathlib import Path
 from uuid import uuid4
 
 # ---------------- CONFIG ----------------
-API_URL = "https://llm-code-deployment-6om1.onrender.com/api-endpoint"  # Change to your deployed Render URL if needed
-EVAL_MOCK_URL = "https://webhook.site/c7bcc38a-d1fa-4c2f-9e5d-a8dc8775df32"  # Use your own webhook.site URL to capture evals
-STUDENT_SECRET = "21f3001995-P1"  # must match your config.py
+API_URL = "https://llm-code-deployment-6om1.onrender.com/api-endpoint"  # Your deployed Render URL
+EVAL_MOCK_URL = "https://webhook.site/c7bcc38a-d1fa-4c2f-9e5d-a8dc8775df32"  # Your webhook.site URL
+STUDENT_SECRET = "21f3001995-P1"  # Must match your config.py
 TASK_ID = "test-task-1-1"
 EMAIL = "21f3001995@ds.study.iitm.ac.in"
 
@@ -22,22 +22,27 @@ EMAIL = "21f3001995@ds.study.iitm.ac.in"
 attachments_dir = Path("./sample_attachments")
 attachments_dir.mkdir(exist_ok=True)
 
-# Create a sample CSV for testing
+# Sample CSV for testing
 (sample_csv := attachments_dir / "data.csv").write_text("product,sales\nA,100\nB,200")
 
 def encode_attachments():
+    """Convert attachment files to base64 URLs."""
     files = []
     for f in attachments_dir.iterdir():
-        with open(f, "rb") as fp:
-            b64 = base64.b64encode(fp.read()).decode()
-        mime = "text/csv" if f.suffix == ".csv" else "application/octet-stream"
-        files.append({"name": f.name, "url": f"data:{mime};base64,{b64}"})
+        if f.is_file():
+            with open(f, "rb") as fp:
+                b64 = base64.b64encode(fp.read()).decode()
+            mime = "text/csv" if f.suffix == ".csv" else "application/octet-stream"
+            files.append({"name": f.name, "url": f"data:{mime};base64,{b64}"})
     return files
 
-BRIEF = "Generate a simple HTML page that displays the sum of sales in #total-sales."
+# ---------------- BRIEFS ----------------
+BRIEF_R1 = "Generate a simple HTML page that displays the sum of sales in #total-sales."
+BRIEF_R2 = "Update the page to show a table #product-sales with all products and their sales."
 
 # ---------------- HELPER ----------------
 def send_task(round_num: int, brief: str):
+    """Send a POST request to the Student API."""
     nonce = str(uuid4())
     payload = {
         "email": EMAIL,
@@ -52,20 +57,22 @@ def send_task(round_num: int, brief: str):
     }
 
     print(f"\n🚀 Sending Round {round_num} request...")
-    resp = requests.post(API_URL, json=payload, timeout=30)
-    print("Status:", resp.status_code)
     try:
-        print(json.dumps(resp.json(), indent=2))
-    except Exception:
-        print("Response content:", resp.text)
+        resp = requests.post(API_URL, json=payload, timeout=60)
+        print("Status:", resp.status_code)
+        try:
+            print(json.dumps(resp.json(), indent=2))
+        except Exception:
+            print("Response content (not JSON):", resp.text)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Request failed: {e}")
 
 
 if __name__ == "__main__":
-    # Test Round 1 (Create new repo)
-    send_task(1, BRIEF)
+    # Test Round 1: Create new repo
+    send_task(1, BRIEF_R1)
 
-    # Test Round 2 (Update existing repo)
-    BRIEF_R2 = "Update the page to show a table #product-sales with all products and their sales."
+    # Test Round 2: Update existing repo
     send_task(2, BRIEF_R2)
 
-    print("\n✅ Local testing finished. Check /eval-mock logs for JSON payloads.")
+    print("\n✅ Testing finished. Check webhook.site for evaluation payloads.")

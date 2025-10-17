@@ -25,30 +25,59 @@ import json
 app = FastAPI(title="LLM Code Deployment - Student API", version="1.0.0")
 
 # ---------------------------------------------------------------------
+# Track ongoing tasks to queue Round 2 after Round 1
+# ---------------------------------------------------------------------
+ongoing_tasks: dict[str, asyncio.Task] = {}
+
+# ---------------------------------------------------------------------
+# Helper: Wait for GitHub Pages to go live
+# ---------------------------------------------------------------------
+async def wait_for_pages(url: str, timeout: int = 300) -> bool:
+    """Wait until GitHub Pages is live (HTTP 200) or timeout in seconds."""
+    import httpx
+    start = asyncio.get_event_loop().time()
+    while asyncio.get_event_loop().time() - start < timeout:
+        try:
+            r = await asyncio.to_thread(lambda: httpx.get(url, timeout=5))
+            if r.status_code == 200:
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(3)
+    return False
+
+# ---------------------------------------------------------------------
 # 1️⃣ POST /api-endpoint : receive task
 # ---------------------------------------------------------------------
 @app.post("/api-endpoint")
 async def receive_task(request: Request):
-    try:
-        data = await request.json()
+    data = await request.json()
 
-        # Secret verification
-        if data.get("secret") != STUDENT_SECRET:
-            raise HTTPException(status_code=403, detail="Invalid secret")
+    # Secret verification
+    if data.get("secret") != STUDENT_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret")
 
-        # Async process task
-        asyncio.create_task(process_task(data))
+    email = data["email"]
+    task_id = data["task"]
+    round_num = int(data.get("round", 1))
+    key = f"{email}:{task_id}"
 
-        return {
-            "status": "ok",
-            "message": "Request received and processing started.",
-            "task": data.get("task"),
-            "round": data.get("round", 1),
-        }
+    # Queue Round 2 if Round 1 is still running
+    if round_num == 2 and key in ongoing_tasks:
+        task = ongoing_tasks[key]
+        if not task.done():
+            print(f"⏳ Round 2 waiting for Round 1 to finish for {key}")
+            await task
 
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=400, detail=str(e))
+    # Start processing the current round
+    ongoing_tasks[key] = asyncio.create_task(process_task(data))
+
+    return {
+        "status": "ok",
+        "message": "Request received and processing started.",
+        "task": task_id,
+        "round": round_num,
+    }
 
 # ---------------------------------------------------------------------
 # 2️⃣ process_task(): core logic
@@ -66,10 +95,8 @@ async def process_task(data: dict):
 
         print(f"\n🚀 Starting Round {round_num} for {task_id} ({email})")
 
-        # Create workspace
+        # Use consistent workspace for same task + nonce
         repo_folder = BASE_REPO_DIR / f"{task_id}_{nonce}_app"
-        if repo_folder.exists():
-            shutil.rmtree(repo_folder)
         repo_folder.mkdir(parents=True, exist_ok=True)
 
         # Save attachments
@@ -91,7 +118,13 @@ async def process_task(data: dict):
         repo_name, commit_sha, pages_url = create_or_update_repo(task_id, repo_folder, round_num)
         print(f"✅ GitHub push complete: {repo_name} @ {commit_sha}")
 
-        # Notify instructor evaluation_url
+        # Wait for Pages to go live
+        if await wait_for_pages(pages_url):
+            print(f"🌐 Pages live at {pages_url}")
+        else:
+            print(f"⚠️ Pages did not go live within timeout, notifying anyway.")
+
+        # Notify evaluation API
         await notify_evaluation_api(
             evaluation_url=evaluation_url,
             email=email,
